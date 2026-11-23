@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.levels import BUSY_FROM, CATEGORY_LABELS, LEVEL_NAMES, RELAXED, category_label
@@ -19,6 +19,7 @@ from app.models import Forecast, Place, PlaceStatus
 from app.schemas import (
     AnswerInfo,
     CategoryCount,
+    HealthResponse,
     HomeAnswer,
     HomeResponse,
     NearbyResponse,
@@ -32,19 +33,31 @@ from app.schemas import (
     TimelinePoint,
 )
 from app.services.answer import (
+    Answer,
     build_answer,
     relaxed_hours,
     relaxed_until_text,
     topic_particle,
 )
 from app.services.geo import NEARBY_COUNT, NEARBY_LIMIT_KM, distance_km
-from app.services.search import SearchablePlace, search_places
-from app.timeutil import format_hour, short_hour
+from app.services.search import (
+    MAX_QUERY_LENGTH,
+    SearchablePlace,
+    is_searchable,
+    search_places,
+)
+from app.timeutil import format_hour, local_hour, short_hour
+
+# MAX_QUERY_LENGTH와 is_searchable은 라우터가 입력 검증에 쓴다.
+# 라우터가 services/search.py를 직접 건너뛰어 부르지 않도록 여기서 다시 내보낸다.
+__all__ = ["MAX_QUERY_LENGTH", "is_searchable"]
 
 TOP_COUNT = 5
 # 그래프는 '지금' 1칸 + 예측 11칸 = 12칸
 TIMELINE_FUTURE = 11
 AXIS_LABEL_EVERY_HOURS = 3
+# 거리는 소수 첫째 자리(100m 단위)까지 보여 준다. 근처 대안의 "거리가 같다"도 이 단위로 본다.
+DISTANCE_DIGITS = 1
 
 
 @dataclass
@@ -91,6 +104,20 @@ def load_views(session: Session, now: datetime, stale_after_minutes: int) -> lis
     return views
 
 
+def find_view(views: list[PlaceView], code: str) -> PlaceView | None:
+    return next((view for view in views if view.place.code == code), None)
+
+
+def health(session: Session, views: list[PlaceView]) -> HealthResponse:
+    last = session.scalar(select(func.max(PlaceStatus.last_success_at)))
+    return HealthResponse(
+        status="ok",
+        place_count=len(views),
+        fresh_count=sum(view.fresh for view in views),
+        last_success_at=last,
+    )
+
+
 def rank_key(view: PlaceView) -> tuple:
     """여유 순: 지금 단계가 낮을수록, 여유가 오래 이어질수록 앞."""
     return (view.level, -relaxed_hours(view.level, view.future), view.place.name)
@@ -111,7 +138,7 @@ def to_card(view: PlaceView, now: datetime, distance: float | None = None) -> Pl
         observed_at=view.status.observed_at if view.status else None,
         stale=not view.fresh,
         calm_text=calm_text,
-        distance_km=None if distance is None else round(distance, 1),
+        distance_km=None if distance is None else round(distance, DISTANCE_DIGITS),
     )
 
 
@@ -154,8 +181,10 @@ def alternatives(
 ) -> list[PlaceCard]:
     """근처의 덜 붐비는 곳. 출발점에서 5km 안, 가까운 순 3곳.
 
-    기준 장소보다 단계가 낮은 곳만 고른다(기준이 이미 여유면 다른 여유인 곳).
-    거리가 100m 단위로 같으면 같은 분류를 먼저 둔다.
+    - 기준 장소보다 단계가 낮은 곳만 고른다(기준이 이미 여유면 다른 여유인 곳).
+    - 기준 장소의 값이 없으면 '약간 붐빔'으로 보고 그보다 덜 붐비는 곳을 찾는다.
+    - 값이 없거나 오래된(지연) 장소는 추천하지 않는다.
+    - 거리가 100m 단위로 같으면 같은 분류를 먼저 둔다.
     """
     base_level = base.level or BUSY_FROM
     found = []
@@ -170,7 +199,7 @@ def alternatives(
             found.append((view, distance))
     found.sort(
         key=lambda item: (
-            round(item[1], 1),
+            round(item[1], DISTANCE_DIGITS),
             item[0].place.category != base.place.category,
             item[1],
         )
@@ -208,12 +237,8 @@ def directions_url(name: str) -> str:
     return f"https://map.naver.com/p/search/{quote(name, safe='')}"
 
 
-def detail(views: list[PlaceView], now: datetime, code: str) -> PlaceDetailResponse | None:
-    view = next((item for item in views if item.place.code == code), None)
-    if view is None:
-        return None
-    place = view.place
-    info = PlaceInfo(
+def _place_info(place: Place) -> PlaceInfo:
+    return PlaceInfo(
         code=place.code,
         name=place.name,
         eng_name=place.eng_name,
@@ -222,7 +247,54 @@ def detail(views: list[PlaceView], now: datetime, code: str) -> PlaceDetailRespo
         lat=place.lat,
         lng=place.lng,
     )
+
+
+def _timeline(view: PlaceView, status: PlaceStatus, level: int) -> list[TimelinePoint]:
+    """그래프 칸: 맨 앞이 '지금', 뒤로 예측. 가로축 글자는 3시간마다만 적는다."""
+    points = [
+        TimelinePoint(
+            time=status.observed_at,
+            level=level,
+            level_label=LEVEL_NAMES[level],
+            is_now=True,
+            axis_label="지금",
+            full_label="지금",
+        )
+    ]
+    for moment, future_level in view.future:
+        show_axis = local_hour(moment) % AXIS_LABEL_EVERY_HOURS == 0
+        points.append(
+            TimelinePoint(
+                time=moment,
+                level=future_level,
+                level_label=LEVEL_NAMES[future_level],
+                is_now=False,
+                axis_label=short_hour(moment) if show_axis else "",
+                full_label=format_hour(moment),
+            )
+        )
+    return points
+
+
+def _recommend(answer: Answer, timeline_length: int) -> Recommend | None:
+    """답이 가리키는 구간을 timeline 색인으로 바꾼다. 범위를 벗어나면 강조하지 않는다."""
+    if answer.recommend_start is None or answer.recommend_end is None or not answer.recommend_tag:
+        return None
+    # timeline은 맨 앞에 '지금'이 있어서 예측 색인에 1을 더한다.
+    start, end = answer.recommend_start + 1, answer.recommend_end + 1
+    if not 0 < start < end <= timeline_length:
+        return None
+    return Recommend(start_index=start, end_index=end, tag=answer.recommend_tag)
+
+
+def detail(views: list[PlaceView], now: datetime, code: str) -> PlaceDetailResponse | None:
+    view = find_view(views, code)
+    if view is None:
+        return None
+    place = view.place
+    info = _place_info(place)
     if view.status is None or view.level is None:
+        # 한 번도 수집되지 않은 장소: 상태·답·그래프 없이 장소 정보만 돌려준다.
         return PlaceDetailResponse(
             place=info,
             status=None,
@@ -234,40 +306,9 @@ def detail(views: list[PlaceView], now: datetime, code: str) -> PlaceDetailRespo
             directions_url=directions_url(place.name),
         )
 
-    level = view.level
-    status = view.status
+    level, status = view.level, view.status
     answer = build_answer(level, view.future, now)
-    timeline = [
-        TimelinePoint(
-            time=status.observed_at,
-            level=level,
-            level_label=LEVEL_NAMES[level],
-            is_now=True,
-            axis_label="지금",
-            full_label="지금",
-        )
-    ]
-    for moment, future_level in view.future:
-        local_hour = short_hour(moment)
-        show_axis = local_hour == "자정" or int(local_hour[:-1]) % AXIS_LABEL_EVERY_HOURS == 0
-        timeline.append(
-            TimelinePoint(
-                time=moment,
-                level=future_level,
-                level_label=LEVEL_NAMES[future_level],
-                is_now=False,
-                axis_label=local_hour if show_axis else "",
-                full_label=format_hour(moment),
-            )
-        )
-    recommend = None
-    if answer.recommend_start is not None and answer.recommend_tag:
-        # timeline은 맨 앞에 '지금'이 있어서 예측 색인에 1을 더한다.
-        recommend = Recommend(
-            start_index=answer.recommend_start + 1,
-            end_index=(answer.recommend_end or answer.recommend_start + 1) + 1,
-            tag=answer.recommend_tag,
-        )
+    timeline = _timeline(view, status, level)
     near = alternatives(views, now, base=view, origin_lat=place.lat, origin_lng=place.lng)
     return PlaceDetailResponse(
         place=info,
@@ -286,7 +327,7 @@ def detail(views: list[PlaceView], now: datetime, code: str) -> PlaceDetailRespo
             detail=answer.detail,
         ),
         timeline=timeline,
-        recommend=recommend,
+        recommend=_recommend(answer, len(timeline)),
         nearby_top=near[0] if near else None,
         primary_action="nearby" if level >= BUSY_FROM else "directions",
         directions_url=directions_url(place.name),

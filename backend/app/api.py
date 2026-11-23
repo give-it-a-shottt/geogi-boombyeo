@@ -1,4 +1,7 @@
-"""조회 API. 읽기만 한다 — 화면은 서울시 API가 아니라 우리 DB의 값만 본다."""
+"""조회 API. 읽기만 한다 — 화면은 서울시 API가 아니라 우리 DB의 값만 본다.
+
+라우터는 입력 검증과 404/422만 맡고, 계산과 DB 읽기는 services/places.py가 한다.
+"""
 
 from __future__ import annotations
 
@@ -6,13 +9,11 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.levels import CATEGORY_LABELS
-from app.models import PlaceStatus
 from app.schemas import (
     HealthResponse,
     HomeResponse,
@@ -23,15 +24,17 @@ from app.schemas import (
 )
 from app.services import places as service
 from app.services.places import PlaceView
-from app.services.search import MAX_QUERY_LENGTH
 from app.timeutil import now_utc
 
 router = APIRouter(prefix="/api")
 
 SessionDep = Annotated[Session, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
-Latitude = Annotated[float, Query(ge=-90, le=90)]
-Longitude = Annotated[float, Query(ge=-180, le=180)]
+# allow_inf_nan=False: "nan"·"inf"는 범위 비교에 걸리지 않으므로 따로 막는다.
+Latitude = Annotated[float, Query(ge=-90, le=90, allow_inf_nan=False)]
+Longitude = Annotated[float, Query(ge=-180, le=180, allow_inf_nan=False)]
+
+PLACE_NOT_FOUND = "없는 장소예요"
 
 
 def _views(session: Session, settings: Settings) -> tuple[list[PlaceView], datetime]:
@@ -42,13 +45,7 @@ def _views(session: Session, settings: Settings) -> tuple[list[PlaceView], datet
 @router.get("/health", response_model=HealthResponse)
 def health(session: SessionDep, settings: SettingsDep) -> HealthResponse:
     views, _now = _views(session, settings)
-    last = session.scalar(select(func.max(PlaceStatus.last_success_at)))
-    return HealthResponse(
-        status="ok",
-        place_count=len(views),
-        fresh_count=sum(view.fresh for view in views),
-        last_success_at=last,
-    )
+    return service.health(session, views)
 
 
 @router.get("/home", response_model=HomeResponse)
@@ -74,16 +71,16 @@ def place_detail(code: str, session: SessionDep, settings: SettingsDep) -> Place
     views, now = _views(session, settings)
     result = service.detail(views, now, code)
     if result is None:
-        raise HTTPException(status_code=404, detail="없는 장소예요")
+        raise HTTPException(status_code=404, detail=PLACE_NOT_FOUND)
     return result
 
 
 @router.get("/places/{code}/nearby", response_model=NearbyResponse)
 def nearby_from_place(code: str, session: SessionDep, settings: SettingsDep) -> NearbyResponse:
     views, now = _views(session, settings)
-    base = next((view for view in views if view.place.code == code), None)
+    base = service.find_view(views, code)
     if base is None:
-        raise HTTPException(status_code=404, detail="없는 장소예요")
+        raise HTTPException(status_code=404, detail=PLACE_NOT_FOUND)
     return service.nearby_from_place(views, now, base)
 
 
@@ -97,9 +94,13 @@ def nearby_from_location(
 
 @router.get("/search", response_model=SearchResponse)
 def search(
-    q: Annotated[str, Query(min_length=1, max_length=MAX_QUERY_LENGTH)],
+    q: Annotated[str, Query(min_length=1, max_length=service.MAX_QUERY_LENGTH)],
     session: SessionDep,
     settings: SettingsDep,
 ) -> SearchResponse:
+    query = q.strip()
+    # 띄어쓰기나 기호만 있는 검색어는 빈 값과 같다.
+    if not service.is_searchable(query):
+        raise HTTPException(status_code=422, detail="검색어를 입력해 주세요")
     views, now = _views(session, settings)
-    return service.search(views, now, q.strip())
+    return service.search(views, now, query)

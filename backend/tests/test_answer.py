@@ -122,7 +122,9 @@ def test_format_hour_never_uses_24h(hour, text):
 
 def test_relaxed_until_text():
     assert relaxed_until_text(future([1, 1, 3]), NOW) == "오후 6시까지 여유로울 거예요"
-    assert relaxed_until_text(future([1, 1, 1]), NOW) == "오늘은 계속 여유로울 거예요"
+    assert relaxed_until_text(future([1] * 6), NOW) == "오늘은 계속 여유로울 거예요"
+    # 예측이 몇 시간뿐이면 "오늘은 계속"이라고 단정하지 않는다.
+    assert relaxed_until_text(future([1, 1, 1]), NOW) == "지금 여유로워요"
     assert relaxed_until_text([], NOW) == "지금 여유로워요"
 
 

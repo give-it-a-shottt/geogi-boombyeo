@@ -17,6 +17,11 @@ def parse_seoul_time(text: str) -> datetime:
     return datetime.strptime(text.strip(), "%Y-%m-%d %H:%M").replace(tzinfo=KST).astimezone(UTC)
 
 
+def local_hour(moment: datetime) -> int:
+    """한국 시간의 시(0 ~ 23)."""
+    return moment.astimezone(KST).hour
+
+
 def period_of(hour: int) -> str:
     """시간대 말. 디자인 md의 '시간대 말' 줄과 같다."""
     if hour == 0:

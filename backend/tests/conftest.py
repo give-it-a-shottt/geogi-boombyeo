@@ -14,6 +14,9 @@ from app.main import app
 from app.models import Forecast, PlaceStatus
 from app.seed import sync_places
 
+# 테스트의 "지금": 한국 시간 2026-11-23(월) 15:20
+FIXED_NOW = datetime(2026, 11, 23, 6, 20, tzinfo=UTC)
+
 
 @pytest.fixture
 def session_factory():
@@ -46,7 +49,11 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def client(session_factory, settings):
+def client(session_factory, settings, monkeypatch):
+    # API가 보는 "지금"을 고정한다. 테스트가 정시를 넘기는 순간에 깨지지 않게 하고,
+    # set_status가 넣는 값과 같은 시계를 쓰게 한다.
+    monkeypatch.setattr("app.api.now_utc", lambda: FIXED_NOW)
+
     def override_session():
         with session_factory() as session:
             yield session
@@ -71,7 +78,7 @@ def set_status(
     now: datetime | None = None,
 ) -> None:
     """장소 하나에 최신 상태와 앞으로의 예측을 넣는다."""
-    now = now or datetime.now(UTC)
+    now = now or FIXED_NOW
     observed = now - timedelta(minutes=minutes_ago)
     session.merge(
         PlaceStatus(

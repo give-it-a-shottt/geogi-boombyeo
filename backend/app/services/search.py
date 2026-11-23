@@ -113,6 +113,22 @@ class SearchResult:
     suggestions: list[str]
 
 
+# 검색 순위(작을수록 앞). 별칭은 여러 장소를 가리키므로 사전에 적힌 순서(0, 1, 2…)를 더한다.
+RANK_EXACT = 0  # 이름이나 별칭이 검색어와 같음
+RANK_NAME_PREFIX = 10  # 이름이 검색어로 시작
+RANK_NAME_CONTAINS = 20  # 이름 안에 검색어가 있음
+RANK_ALIAS_PREFIX = 30  # 별칭이 검색어로 시작
+RANK_ENGLISH = 40  # 영문 이름 안에 검색어가 있음
+# 너무 짧은 검색어는 엉뚱한 곳까지 걸리므로 느슨한 비교에는 최소 길이를 둔다.
+ALIAS_PREFIX_MIN_LENGTH = 2
+ENGLISH_MIN_LENGTH = 3
+
+
+def is_searchable(query: str) -> bool:
+    """띄어쓰기·기호를 빼고도 글자가 남는가. 남지 않으면 검색할 것이 없다."""
+    return bool(normalize(query))
+
+
 def search_places(query: str, places: list[SearchablePlace]) -> SearchResult:
     q = normalize(query[:MAX_QUERY_LENGTH])
     if not q:
@@ -126,21 +142,26 @@ def search_places(query: str, places: list[SearchablePlace]) -> SearchResult:
 
     for alias, names in ALIASES.items():
         key = normalize(alias)
-        if key == q or (len(q) >= 2 and key.startswith(q)):
-            for order, name in enumerate(names):
-                if name in by_name:
-                    offer(by_name[name], (0 if key == q else 3) * 10 + order)
+        if key == q:
+            base_rank = RANK_EXACT
+        elif len(q) >= ALIAS_PREFIX_MIN_LENGTH and key.startswith(q):
+            base_rank = RANK_ALIAS_PREFIX
+        else:
+            continue
+        for order, name in enumerate(names):
+            if name in by_name:
+                offer(by_name[name], base_rank + order)
 
     for place in places:
         name = normalize(place.name)
         if name == q:
-            offer(place.code, 0)
+            offer(place.code, RANK_EXACT)
         elif name.startswith(q):
-            offer(place.code, 10)
+            offer(place.code, RANK_NAME_PREFIX)
         elif q in name:
-            offer(place.code, 20)
-        elif len(q) >= 3 and q in normalize(place.eng_name):
-            offer(place.code, 40)
+            offer(place.code, RANK_NAME_CONTAINS)
+        elif len(q) >= ENGLISH_MIN_LENGTH and q in normalize(place.eng_name):
+            offer(place.code, RANK_ENGLISH)
 
     if ranked:
         order = {place.code: index for index, place in enumerate(places)}

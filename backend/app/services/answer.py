@@ -10,10 +10,19 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from app.levels import RELAXED
-from app.timeutil import KST, format_hour, hour_number, is_next_day_daytime, same_period
+from app.timeutil import (
+    format_hour,
+    hour_number,
+    is_next_day_daytime,
+    local_hour,
+    period_of,
+    same_period,
+)
 
 NOW_PHRASE = {1: "여유로워요", 2: "보통이에요", 3: "약간 붐벼요", 4: "붐벼요"}
 ALL_DAY_PHRASE = {1: "여유로울 거예요", 2: "보통일 거예요", 3: "붐벼요", 4: "붐벼요"}
+# 예측이 이만큼(시간)은 있어야 "오늘은 계속"이라고 말한다. 한두 시간만 보고 단정하지 않는다.
+MIN_HOURS_FOR_ALL_DAY = 6
 
 
 @dataclass(frozen=True)
@@ -46,30 +55,36 @@ def _first_index(levels: list[int], predicate, start: int = 0) -> int | None:
     return None
 
 
+def _first_busy(levels: list[int], start: int = 0) -> int | None:
+    """start부터 처음으로 여유가 아닌 칸. 없으면 None."""
+    return _first_index(levels, lambda level: level > RELAXED, start)
+
+
 def _range_tag(start: datetime, end: datetime | None) -> str:
     """그래프 꼬리표: '오후 4~6시', '오후 4시~밤 9시', '오후 4시부터'."""
     if end is None:
         return f"{format_hour(start)}부터"
     if same_period(start, end):
-        return f"{format_hour(start)[:-1]}~{hour_number(end.astimezone(KST).hour)}시"
+        start_hour, end_hour = local_hour(start), local_hour(end)
+        return f"{period_of(start_hour)} {hour_number(start_hour)}~{hour_number(end_hour)}시"
     return f"{format_hour(start)}~{format_hour(end)}"
 
 
 def relaxed_until_text(future: list[tuple[datetime, int]], now: datetime) -> str:
     """지금 여유인 장소의 둘째 줄: 여유가 언제까지 이어지는지."""
-    if not future:
-        return "지금 여유로워요"
-    busy = _first_index([level for _, level in future], lambda level: level > RELAXED)
-    if busy is None:
+    busy = _first_busy([level for _, level in future])
+    if busy is not None:
+        return f"{_hour(future[busy][0], now)}까지 여유로울 거예요"
+    if len(future) >= MIN_HOURS_FOR_ALL_DAY:
         return "오늘은 계속 여유로울 거예요"
-    return f"{_hour(future[busy][0], now)}까지 여유로울 거예요"
+    return "지금 여유로워요"
 
 
 def relaxed_hours(now_level: int | None, future: list[tuple[datetime, int]]) -> int:
     """여유가 앞으로 몇 칸(시간) 이어지는지. 순위를 매길 때 쓴다."""
     if now_level != RELAXED:
         return 0
-    busy = _first_index([level for _, level in future], lambda level: level > RELAXED)
+    busy = _first_busy([level for _, level in future])
     return len(future) if busy is None else busy
 
 
@@ -83,20 +98,23 @@ def build_answer(now_level: int, future: list[tuple[datetime, int]], now: dateti
 
     times = [moment for moment, _ in future]
     levels = [level for _, level in future]
+    enough_for_all_day = len(future) >= MIN_HOURS_FOR_ALL_DAY
 
     if now_level == RELAXED:
-        busy = _first_index(levels, lambda level: level > RELAXED)
-        if busy is None:
-            return Answer(kind="calm_all", lines=("오늘은 계속", ALL_DAY_PHRASE[1]))
-        return Answer(
-            kind="calm_now",
-            lines=("지금 가도", "여유로워요"),
-            detail=f"{_hour(times[busy], now)}까지 여유로울 거예요",
-        )
+        busy = _first_busy(levels)
+        if busy is not None:
+            return Answer(
+                kind="calm_now",
+                lines=("지금 가도", "여유로워요"),
+                detail=f"{_hour(times[busy], now)}까지 여유로울 거예요",
+            )
+        if enough_for_all_day:
+            return Answer(kind="calm_all", lines=("오늘은 계속", ALL_DAY_PHRASE[RELAXED]))
+        return Answer(kind="calm_now", lines=("지금 가도", "여유로워요"))
 
     calm = _first_index(levels, lambda level: level == RELAXED)
     if calm is not None:
-        busy_again = _first_index(levels, lambda level: level > RELAXED, calm + 1)
+        busy_again = _first_busy(levels, calm + 1)
         start = times[calm]
         if busy_again is None:
             return Answer(
@@ -107,7 +125,11 @@ def build_answer(now_level: int, future: list[tuple[datetime, int]], now: dateti
                 recommend_tag=_range_tag(start, None),
             )
         end = times[busy_again]
-        end_text = format_hour(end, with_period=not same_period(start, end))
+        # 같은 시간대면 끝 시각의 "오후"를 줄이고, 다르면 온전히("내일"까지) 말한다.
+        if same_period(start, end):
+            end_text = format_hour(end, with_period=False)
+        else:
+            end_text = _hour(end, now)
         return Answer(
             kind="calm_later",
             lines=(f"{_hour(start, now)}부터 {end_text}까지", "여유로울 거예요"),
@@ -128,7 +150,9 @@ def build_answer(now_level: int, future: list[tuple[datetime, int]], now: dateti
             recommend_tag=format_hour(times[best]),
         )
     if all(level == now_level for level in levels):
-        return Answer(kind="same_all", lines=("오늘은 계속", ALL_DAY_PHRASE[now_level]))
+        if enough_for_all_day:
+            return Answer(kind="same_all", lines=("오늘은 계속", ALL_DAY_PHRASE[now_level]))
+        return Answer(kind="no_forecast", lines=("지금은", NOW_PHRASE[now_level]))
     # 앞으로 더 붐비기만 한다 → 지금이 가장 낫다.
     return Answer(kind="least_busy_now", lines=("지금이", "그나마 덜 붐벼요"))
 
@@ -136,6 +160,9 @@ def build_answer(now_level: int, future: list[tuple[datetime, int]], now: dateti
 # 영문자로 끝나는 이름(DDP, DMC)은 글자를 읽는 소리의 받침으로 조사를 고른다.
 # 받침이 있는 글자는 엘·엠·엔·알뿐이다.
 _LETTERS_WITH_FINAL_CONSONANT = "LMNR"
+_DIGITS_WITH_FINAL_CONSONANT = "013678"
+_HANGUL_FIRST, _HANGUL_LAST = "가", "힣"
+_FINAL_CONSONANT_CYCLE = 28
 
 
 def topic_particle(name: str) -> str:
@@ -145,10 +172,11 @@ def topic_particle(name: str) -> str:
     """
     base = name.split("(")[0].strip() or name
     last = base[-1]
-    if "가" <= last <= "힣":
-        return "은" if (ord(last) - ord("가")) % 28 else "는"
+    if _HANGUL_FIRST <= last <= _HANGUL_LAST:
+        has_final = (ord(last) - ord(_HANGUL_FIRST)) % _FINAL_CONSONANT_CYCLE != 0
+        return "은" if has_final else "는"
     if last.isdigit():
-        return "은" if last in "013678" else "는"
+        return "은" if last in _DIGITS_WITH_FINAL_CONSONANT else "는"
     if last.isascii() and last.isalpha():
         return "은" if last.upper() in _LETTERS_WITH_FINAL_CONSONANT else "는"
     return "은(는)"
