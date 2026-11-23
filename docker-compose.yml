@@ -65,11 +65,34 @@ services:
     restart: unless-stopped
     environment:
       BACKEND_URL: http://api:8000
+    # 이 컴퓨터 안에서만 열린다(127.0.0.1). 인터넷에서 오는 요청은 아래 caddy가 받아 넘긴다.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       api:
         condition: service_healthy
 
+  # HTTPS 문지기. 실제 서버에서만 켠다: docker compose --profile https up -d --build
+  # 도메인의 인증서를 무료(Let's Encrypt)로 받아 오고 알아서 갱신한다.
+  # 브라우저의 위치 기능은 https 주소에서만 동작하므로 배포할 때 꼭 필요하다.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # 받아 온 인증서를 보관한다. 지우면 다시 받아야 하고, 너무 자주 받으면 발급이 막힌다.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+
 volumes:
   db-data:
+  caddy-data:
+  caddy-config:

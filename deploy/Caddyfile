@@ -1,0 +1,14 @@
+# HTTPS 문지기(Caddy) 설정. 도메인은 .env의 SITE_DOMAIN에서 받는다.
+# http로 들어온 요청은 Caddy가 알아서 https로 돌린다.
+
+{$SITE_DOMAIN} {
+	encode gzip
+	# 한 번 https로 들어온 브라우저는 1년 동안 https로만 접속한다.
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy web:3000
+}
+
+# www를 붙여 들어오면 붙이지 않은 주소로 보낸다.
+www.{$SITE_DOMAIN} {
+	redir https://{$SITE_DOMAIN}{uri} permanent
+}
