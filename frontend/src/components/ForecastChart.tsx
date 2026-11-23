@@ -27,12 +27,17 @@ const AXIS = [
 /** 앞으로 12시간. 그래프와 표를 바꿔 볼 수 있다(같은 정보를 색 없이도 읽을 수 있게). */
 export function ForecastChart({
   timeline,
-  recommend,
+  recommend: given,
 }: {
   timeline: TimelinePoint[];
   recommend: Recommend | null;
 }) {
   const [view, setView] = useState<"chart" | "table">("chart");
+  // 추천 구간이 그래프 범위를 벗어나면(서버 값이 어긋난 경우) 강조만 하지 않는다.
+  const recommend =
+    given && given.start_index >= 0 && given.start_index < given.end_index && given.end_index <= timeline.length
+      ? given
+      : null;
   const inRange = (index: number) =>
     recommend !== null && index >= recommend.start_index && index < recommend.end_index;
 

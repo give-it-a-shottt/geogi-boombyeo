@@ -20,6 +20,12 @@ test("agoText는 분 · 시간 · 일 단위로 바뀐다", () => {
   assert.equal(agoText("2026-11-23T06:31:00Z", now), "방금 기준");
 });
 
+test("읽을 수 없는 시각은 NaN을 보여 주지 않는다", () => {
+  const now = new Date("2026-11-23T06:30:00Z");
+  assert.equal(agoText("잘못된 값", now), "기준 시각 확인 중");
+  assert.equal(clockText(""), "시각 확인 중");
+});
+
 test("distanceText는 1km 아래를 m로 쓴다", () => {
   assert.equal(distanceText(0.8), "800m");
   assert.equal(distanceText(0), "100m");

@@ -13,7 +13,9 @@ function period(hour: number): string {
 
 /** "오후 3시 5분" — 한국 시간. 서버와 브라우저에서 같은 글자가 나온다. */
 export function clockText(iso: string): string {
-  const kst = new Date(new Date(iso).getTime() + KST_OFFSET_MS);
+  const observed = new Date(iso).getTime();
+  if (Number.isNaN(observed)) return "시각 확인 중";
+  const kst = new Date(observed + KST_OFFSET_MS);
   const hour = kst.getUTCHours();
   const minute = kst.getUTCMinutes();
   const hourText = hour === 0 ? "밤 12시" : `${period(hour)} ${hour > 12 ? hour - 12 : hour}시`;
@@ -22,7 +24,10 @@ export function clockText(iso: string): string {
 
 /** "25분 전 기준", "2시간 전 기준" */
 export function agoText(iso: string, now: Date): string {
-  const minutes = Math.max(0, Math.round((now.getTime() - new Date(iso).getTime()) / 60000));
+  const observed = new Date(iso).getTime();
+  // 시각을 읽을 수 없으면 "NaN분 전"이 아니라 모른다고 말한다.
+  if (Number.isNaN(observed)) return "기준 시각 확인 중";
+  const minutes = Math.max(0, Math.round((now.getTime() - observed) / 60000));
   if (minutes < 1) return "방금 기준";
   if (minutes < 60) return `${minutes}분 전 기준`;
   const hours = Math.floor(minutes / 60);

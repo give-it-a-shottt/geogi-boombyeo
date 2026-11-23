@@ -4,8 +4,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+# 사이트 주소는 빌드할 때 필요하다. sitemap.xml · robots.txt · 공유 주소가 빌드 때
+# 만들어져서, 실행할 때 환경변수로 주면 이미 localhost로 굳은 뒤다.
+ARG SITE_URL=http://localhost:3000
+ENV SITE_URL=$SITE_URL \
+    NEXT_TELEMETRY_DISABLED=1
 # 빌드 때는 백엔드가 없어도 된다. 장소 페이지는 실행 뒤 첫 요청에서 데이터를 채운다.
-ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 # 실행 단계: 필요한 파일만 담는다.

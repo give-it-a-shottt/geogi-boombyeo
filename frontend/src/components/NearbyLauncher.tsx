@@ -20,16 +20,22 @@ type State =
   | { step: "error" };
 
 const GEO_TIMEOUT_MS = 8000;
+const GEO_MAX_AGE_MS = 60_000;
+// 서버로 보내는 좌표의 소수 자리. 셋째 자리는 약 110m로, 5km 안의 장소를 찾기에 충분하다.
+const COORDINATE_DIGITS = 3;
+
+/** 위치를 알 수 없음: 권한 거부, 시간 초과, 지원하지 않는 브라우저. 문구가 아니라 종류로 구분한다. */
+class LocationUnavailableError extends Error {}
 
 function locate(): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
     if (!("geolocation" in navigator)) {
-      reject(new Error("위치를 지원하지 않는 브라우저"));
+      reject(new LocationUnavailableError());
       return;
     }
-    navigator.geolocation.getCurrentPosition(resolve, reject, {
+    navigator.geolocation.getCurrentPosition(resolve, () => reject(new LocationUnavailableError()), {
       timeout: GEO_TIMEOUT_MS,
-      maximumAge: 60_000,
+      maximumAge: GEO_MAX_AGE_MS,
     });
   });
 }
@@ -61,8 +67,8 @@ export function NearbyLauncher({
     } else {
       const position = await locate();
       const { latitude, longitude } = position.coords;
-      // 위치는 이 요청에만 쓰고 저장하지 않는다. 소수 넷째 자리(약 10m)까지만 보낸다.
-      url = `/api/nearby?lat=${latitude.toFixed(4)}&lng=${longitude.toFixed(4)}`;
+      // 위치는 이 요청에만 쓰고 저장하지 않는다. 필요한 만큼만 뭉툭하게 보낸다.
+      url = `/api/nearby?lat=${latitude.toFixed(COORDINATE_DIGITS)}&lng=${longitude.toFixed(COORDINATE_DIGITS)}`;
     }
     const response = await fetch(url);
     if (!response.ok) throw new Error("근처 장소를 불러오지 못함");
@@ -75,17 +81,22 @@ export function NearbyLauncher({
     try {
       const data = await load();
       setState({ step: "done", data });
-      dialogRef.current?.showModal();
+      showSheet();
     } catch (error) {
       // 위치 권한 거부 · 실패 → 검색으로 (유저플로우 B의 "아니오" 갈래)
-      if (source.kind === "location" && isGeolocationError(error)) {
+      if (error instanceof LocationUnavailableError) {
         setState({ step: "idle" });
         router.push("/search?from=location");
         return;
       }
       setState({ step: "error" });
-      dialogRef.current?.showModal();
+      showSheet();
     }
+  }
+
+  function showSheet() {
+    // 이미 열린 시트에서 다시 시도할 때 showModal을 또 부르면 오류가 난다.
+    if (!dialogRef.current?.open) dialogRef.current?.showModal();
   }
 
   function close() {
@@ -117,16 +128,9 @@ export function NearbyLauncher({
             <XIcon size={24} aria-hidden="true" />
           </button>
         </div>
-        <SheetBody state={state} source={source} onNavigate={close} />
+        <SheetBody state={state} source={source} onNavigate={close} onRetry={open} />
       </dialog>
     </>
-  );
-}
-
-function isGeolocationError(error: unknown): boolean {
-  return (
-    (typeof GeolocationPositionError !== "undefined" && error instanceof GeolocationPositionError) ||
-    (error instanceof Error && error.message.startsWith("위치"))
   );
 }
 
@@ -134,19 +138,33 @@ function SheetBody({
   state,
   source,
   onNavigate,
+  onRetry,
 }: {
   state: State;
   source: Source;
   onNavigate: () => void;
+  onRetry: () => void;
 }) {
   if (state.step === "error") {
     return (
-      <p className={sheet.message}>
-        <strong>불러오지 못했어요</strong>
-        잠시 뒤에 다시 눌러 주세요.
-      </p>
+      <>
+        <p className={sheet.message}>
+          <strong>불러오지 못했어요</strong>
+          잠시 뒤에 다시 시도해 주세요.
+        </p>
+        <div className={sheet.actions}>
+          <button
+            type="button"
+            className={`${ui.button} ${ui.l} ${ui.secondary} ${ui.block}`}
+            onClick={onRetry}
+          >
+            다시 시도
+          </button>
+        </div>
+      </>
     );
   }
+  if (state.step === "loading") return <p className={sheet.message}>찾는 중이에요</p>;
   if (state.step !== "done") return null;
 
   const { base, alternatives } = state.data;
