@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), extra="ignore")
 
-    seoul_api_key: str = ""
+    # SecretStr: 설정 객체를 실수로 로그에 찍어도 값이 '**********'로만 나온다.
+    seoul_api_key: SecretStr = SecretStr("")
+    # API 문서 화면(/api/docs). 프론트의 /api 중계를 타고 밖에 보이지 않게 기본은 끈다.
+    enable_docs: bool = False
     seoul_api_base_url: str = "http://openapi.seoul.go.kr:8088"
     database_url: str = "sqlite:///./local.db"
 

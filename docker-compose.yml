@@ -1,6 +1,8 @@
 # 거기붐벼? 전체 구성: DB + 조회 API + 수집 워커 + 웹
-# 실행 전에 .env에 SEOUL_API_KEY와 POSTGRES_PASSWORD를 넣는다 (.env.example 참고).
+# 실행 전에 .env에 SEOUL_API_KEY, POSTGRES_PASSWORD, SITE_URL을 넣는다 (.env.example 참고).
 # 밖으로 여는 포트는 웹(3000)뿐이다. DB와 API는 내부 네트워크에서만 보인다.
+
+x-database-url: &database-url postgresql://geogi:${POSTGRES_PASSWORD}@db:5432/geogi
 
 services:
   db:
@@ -21,12 +23,16 @@ services:
   api:
     build: ./backend
     restart: unless-stopped
-    # 테이블을 최신으로 맞춘 뒤 서버를 띄운다. 마이그레이션은 여기 한 곳에서만 돌린다.
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
-    environment: &backend-env
-      DATABASE_URL: postgresql://geogi:${POSTGRES_PASSWORD}@db:5432/geogi
-      SEOUL_API_KEY: ${SEOUL_API_KEY:?SEOUL_API_KEY를 .env에 넣어 주세요}
-      COLLECT_INTERVAL_SECONDS: ${COLLECT_INTERVAL_SECONDS:-300}
+    # 테이블을 최신으로 맞추고 121곳 시드를 넣은 뒤 서버를 띄운다.
+    # 마이그레이션은 여기 한 곳에서만 돌린다.
+    # --no-access-log: 접속 로그에는 요청 주소가 통째로 남는다. "지금 있는 곳" 요청에는
+    # 위도·경도가 들어 있어서, 위치를 저장하지 않는다는 약속을 지키려고 끈다.
+    command: >
+      sh -c "alembic upgrade head && python -m app.seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --no-access-log"
+    # 조회 API는 서울시 인증키가 필요 없다. 키는 worker에만 준다.
+    environment:
+      DATABASE_URL: *database-url
     depends_on:
       db:
         condition: service_healthy
@@ -41,17 +47,24 @@ services:
     restart: unless-stopped
     # 수집은 웹 서버와 따로, 반드시 한 개만 띄운다(여러 개면 같은 값을 중복 수집한다).
     command: python -m app.worker
-    environment: *backend-env
+    environment:
+      DATABASE_URL: *database-url
+      SEOUL_API_KEY: ${SEOUL_API_KEY:?SEOUL_API_KEY를 .env에 넣어 주세요}
+      COLLECT_INTERVAL_SECONDS: ${COLLECT_INTERVAL_SECONDS:-300}
     depends_on:
       api:
         condition: service_healthy
 
   web:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # sitemap · robots · 공유 주소는 빌드할 때 만들어진다. 그래서 사이트 주소는
+      # 실행할 때가 아니라 빌드할 때 넣어야 한다.
+      args:
+        SITE_URL: ${SITE_URL:-http://localhost:3000}
     restart: unless-stopped
     environment:
       BACKEND_URL: http://api:8000
-      SITE_URL: ${SITE_URL:-http://localhost:3000}
     ports:
       - "3000:3000"
     depends_on:

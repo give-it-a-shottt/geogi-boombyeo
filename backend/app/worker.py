@@ -27,7 +27,7 @@ def setup_logging() -> None:
 
 async def run(once: bool) -> int:
     settings = get_settings()
-    if not settings.seoul_api_key:
+    if not settings.seoul_api_key.get_secret_value():
         logger.error("환경변수 SEOUL_API_KEY가 비어 있어요. .env에 인증키를 넣어 주세요.")
         return 1
 

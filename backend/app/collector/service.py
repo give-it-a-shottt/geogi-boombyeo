@@ -14,12 +14,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.collector.client import Observation, SeoulApiError, fetch_place
 from app.config import Settings
-from app.models import Forecast, Place, PlaceStatus, Snapshot
+from app.models import LAST_ERROR_MAX_LENGTH, Forecast, Place, PlaceStatus, Snapshot
 from app.timeutil import now_utc
 
 logger = logging.getLogger(__name__)
 
-ERROR_MAX_LENGTH = 200
+SAVE_FAILED = "저장 실패"
 
 
 @dataclass(frozen=True)
@@ -88,9 +88,57 @@ def record_failure(session: Session, code: str, message: str, now: datetime) -> 
     """실패를 적는다. 마지막으로 성공한 값은 지우지 않는다(오래되면 화면이 '지연'으로 보여 준다)."""
     status = _get_status(session, code, now)
     status.last_attempt_at = now
-    status.fail_count = (status.fail_count or 0) + 1
-    status.last_error = message[:ERROR_MAX_LENGTH]
+    status.fail_count += 1
+    status.last_error = message[:LAST_ERROR_MAX_LENGTH]
     session.commit()
+
+
+async def _fetch_all(
+    http: httpx.AsyncClient, settings: Settings, places: list[tuple[str, str]]
+) -> list[Observation | SeoulApiError]:
+    """모든 장소를 동시에(한 번에 collect_concurrency개씩) 가져온다. 예외를 던지지 않는다."""
+    semaphore = asyncio.Semaphore(settings.collect_concurrency)
+
+    async def fetch(code: str, name: str) -> Observation | SeoulApiError:
+        async with semaphore:
+            try:
+                return await fetch_place(
+                    http,
+                    base_url=settings.seoul_api_base_url,
+                    api_key=settings.seoul_api_key.get_secret_value(),
+                    code=code,
+                    name=name,
+                    retries=settings.collect_retries,
+                )
+            except SeoulApiError as exc:
+                return exc
+            except Exception as exc:
+                # 예상하지 못한 오류도 이 장소만의 실패로 끝낸다. 여기서 예외가 새면
+                # gather가 깨져 121곳 전부가 저장되지 않는다.
+                # 예외 원문에는 주소(인증키)가 들어 있을 수 있어 종류 이름만 남긴다.
+                return SeoulApiError(f"처리 실패 {type(exc).__name__}")
+
+    return await asyncio.gather(*(fetch(code, name) for code, name in places))
+
+
+def _save(session: Session, code: str, result: Observation | SeoulApiError, now: datetime) -> bool:
+    """결과 하나를 저장하고 성공 여부를 돌려준다. 저장 실패도 이 장소만의 실패로 끝낸다."""
+    try:
+        if isinstance(result, SeoulApiError):
+            record_failure(session, code, str(result), now)
+            return False
+        store_observation(session, result, now)
+        return True
+    except SQLAlchemyError:
+        session.rollback()
+        logger.exception("저장 실패 %s", code)
+    try:
+        # 저장하지 못했다는 사실도 장소별 기록에 남긴다. 이것마저 안 되면 로그만 남는다.
+        record_failure(session, code, SAVE_FAILED, now)
+    except SQLAlchemyError:
+        session.rollback()
+        logger.exception("실패 기록도 저장하지 못함 %s", code)
+    return False
 
 
 async def collect_once(
@@ -102,45 +150,21 @@ async def collect_once(
     with session_factory() as session:
         places = [(p.code, p.name) for p in session.scalars(select(Place).order_by(Place.code))]
 
-    semaphore = asyncio.Semaphore(settings.collect_concurrency)
-
-    async def fetch(code: str, name: str) -> Observation | SeoulApiError:
-        async with semaphore:
-            try:
-                return await fetch_place(
-                    http,
-                    base_url=settings.seoul_api_base_url,
-                    api_key=settings.seoul_api_key,
-                    code=code,
-                    name=name,
-                    retries=settings.collect_retries,
-                )
-            except SeoulApiError as exc:
-                return exc
-
-    own_client = client is None
-    http = client or httpx.AsyncClient(timeout=settings.collect_timeout_seconds)
-    try:
-        results = await asyncio.gather(*(fetch(code, name) for code, name in places))
-    finally:
-        if own_client:
-            await http.aclose()
+    if client is None:
+        async with httpx.AsyncClient(timeout=settings.collect_timeout_seconds) as http:
+            results = await _fetch_all(http, settings, places)
+    else:
+        results = await _fetch_all(client, settings, places)
 
     now = now_utc()
-    succeeded = 0
     with session_factory() as session:
-        for (code, _name), result in zip(places, results, strict=True):
-            try:
-                if isinstance(result, SeoulApiError):
-                    record_failure(session, code, str(result), now)
-                else:
-                    store_observation(session, result, now)
-                    succeeded += 1
-            except SQLAlchemyError:
-                # 저장 실패도 이 장소만의 실패로 끝낸다.
-                session.rollback()
-                logger.exception("저장 실패 %s", code)
+        succeeded = sum(
+            _save(session, code, result, now)
+            for (code, _name), result in zip(places, results, strict=True)
+        )
 
-    result = CollectResult(total=len(places), succeeded=succeeded, failed=len(places) - succeeded)
-    logger.info("수집 끝: 전체 %d, 성공 %d, 실패 %d", result.total, result.succeeded, result.failed)
-    return result
+    outcome = CollectResult(total=len(places), succeeded=succeeded, failed=len(places) - succeeded)
+    logger.info(
+        "수집 끝: 전체 %d, 성공 %d, 실패 %d", outcome.total, outcome.succeeded, outcome.failed
+    )
+    return outcome

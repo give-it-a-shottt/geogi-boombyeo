@@ -1,4 +1,8 @@
-"""121곳 시드를 DB에 맞춘다."""
+"""121곳 시드를 DB에 맞춘다.
+
+조회 API와 워커가 뜨기 전에 한 번 실행한다: python -m app.seed
+(워커도 시작할 때 같은 일을 한다. 여러 번 실행해도 결과는 같다.)
+"""
 
 from __future__ import annotations
 
@@ -10,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Place
 
-SEED_PATH = Path(__file__).resolve().parent / "seed" / "places.json"
+SEED_PATH = Path(__file__).resolve().parent / "seed_data" / "places.json"
 
 
 def load_seed() -> list[dict]:
@@ -29,3 +33,14 @@ def sync_places(session: Session) -> int:
                 setattr(place, key, value)
     session.commit()
     return session.scalar(select(func.count()).select_from(Place)) or 0
+
+
+def main() -> None:
+    from app.db import get_session_factory
+
+    with get_session_factory()() as session:
+        print(f"장소 {sync_places(session)}곳 준비됨")
+
+
+if __name__ == "__main__":
+    main()

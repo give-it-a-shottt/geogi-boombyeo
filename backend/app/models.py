@@ -15,6 +15,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, UTCDateTime
 
+# 실패 사유를 저장하는 열의 길이. 수집 쪽이 이 길이에 맞춰 자른다.
+LAST_ERROR_MAX_LENGTH = 200
+
 
 class Place(Base):
     __tablename__ = "places"
@@ -73,4 +76,4 @@ class PlaceStatus(Base):
     last_success_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     last_attempt_at: Mapped[datetime] = mapped_column(UTCDateTime)
     fail_count: Mapped[int] = mapped_column(Integer, default=0)
-    last_error: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(LAST_ERROR_MAX_LENGTH), nullable=True)

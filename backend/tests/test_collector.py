@@ -84,6 +84,8 @@ def test_parse_error_result_and_bad_values():
 
 
 def fetch(handler, **kwargs):
+    kwargs.setdefault("retries", 0)
+
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
             return await fetch_place(
@@ -200,4 +202,6 @@ def test_collect_once_one_place_failing_does_not_stop_others(session_factory, se
         assert session.get(PlaceStatus, "POI002").last_error == "요청한 장소와 다른 장소의 응답"
         assert session.get(PlaceStatus, "POI003").level == 3
     # 인증키가 로그에 남지 않는다.
-    assert settings.seoul_api_key not in caplog.text
+    assert settings.seoul_api_key.get_secret_value() not in caplog.text
+    # 설정 객체를 통째로 찍어도 키가 보이지 않는다(SecretStr).
+    assert "test-key-123" not in repr(settings)

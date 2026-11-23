@@ -25,8 +25,11 @@ for _name in ("httpx", "httpcore"):
 
 SERVICE = "citydata_ppltn"
 RESULT_KEY = "SeoulRtd.citydata_ppltn"
-OK_CODE = "INFO-000"
+# 서울시 API 주소의 "시작 행/끝 행". 장소 하나를 물으면 1줄만 오므로 값은 형식상 필요할 뿐이다.
+ROW_RANGE = "1/5"
+BACKOFF_SECONDS = 0.5
 _XML_CODE = re.compile(r"<CODE>([^<]+)</CODE>")
+_XML_SCAN_LENGTH = 500
 
 
 class SeoulApiError(Exception):
@@ -65,13 +68,28 @@ def _level(name) -> int:
     return level
 
 
-def parse_response(data: dict, expected_code: str) -> Observation:
-    """응답 JSON을 Observation으로. 형식이 다르면 SeoulApiError."""
+def _error_code(data: dict) -> str:
+    result = data.get("RESULT")
+    if isinstance(result, dict):
+        code = result.get("RESULT.CODE") or result.get("CODE")
+        if isinstance(code, str) and code:
+            return code
+    return "응답 형식 다름"
+
+
+def parse_response(data: object, expected_code: str) -> Observation:
+    """응답 JSON을 Observation으로. 모양이 조금이라도 다르면 SeoulApiError.
+
+    밖에서 온 값이라 모양을 믿지 않는다. 이 함수에서 SeoulApiError가 아닌 예외가
+    나가면 수집 한 바퀴 전체가 멈추므로, 예상 밖의 모양은 전부 여기서 걸러 낸다.
+    """
+    if not isinstance(data, dict):
+        raise SeoulApiError("응답 형식 다름")
     rows = data.get(RESULT_KEY)
     if not rows:
-        result = data.get("RESULT") or {}
-        code = result.get("RESULT.CODE") or result.get("CODE") or "응답 형식 다름"
-        raise SeoulApiError(f"서울시 API 오류 {code}")
+        raise SeoulApiError(f"서울시 API 오류 {_error_code(data)}")
+    if not isinstance(rows, list) or not isinstance(rows[0], dict):
+        raise SeoulApiError("응답 형식 다름")
     row = rows[0]
     # 다른 장소의 값이 돌아오는 경우가 있다(예: 체험용 sample 키는 항상 한 장소만 준다).
     if row.get("AREA_CD") != expected_code:
@@ -90,7 +108,8 @@ def parse_response(data: dict, expected_code: str) -> Observation:
                         ppltn_max=_to_int(item.get("FCST_PPLTN_MAX")),
                     )
                 )
-    except (KeyError, ValueError, TypeError) as exc:
+    except (KeyError, ValueError, TypeError, AttributeError) as exc:
+        # 값이 없거나(null), 문자열이 아니거나, 목록 안이 사전이 아닌 경우
         raise SeoulApiError("응답에 필요한 값이 없음") from exc
     forecasts.sort(key=lambda point: point.time)
     return Observation(
@@ -103,17 +122,14 @@ def parse_response(data: dict, expected_code: str) -> Observation:
     )
 
 
-def _decode(response: httpx.Response) -> dict:
+def _decode(response: httpx.Response) -> object:
     """본문을 JSON으로. 인증키 오류는 상태 200에 XML로 온다."""
     try:
-        data = response.json()
+        return response.json()
     except ValueError:
-        match = _XML_CODE.search(response.text[:500])
+        match = _XML_CODE.search(response.text[:_XML_SCAN_LENGTH])
         code = match.group(1) if match else "JSON 아님"
         raise SeoulApiError(f"서울시 API 오류 {code}") from None
-    if not isinstance(data, dict):
-        raise SeoulApiError("응답 형식 다름")
-    return data
 
 
 async def fetch_place(
@@ -123,11 +139,11 @@ async def fetch_place(
     api_key: str,
     code: str,
     name: str,
-    retries: int = 2,
-    backoff_seconds: float = 0.5,
+    retries: int,
+    backoff_seconds: float = BACKOFF_SECONDS,
 ) -> Observation:
     """장소 하나의 실시간 인구를 가져온다. 일시적 실패는 retries번 다시 시도한다."""
-    url = f"{base_url}/{quote(api_key, safe='')}/json/{SERVICE}/1/5/{quote(name, safe='')}"
+    url = f"{base_url}/{quote(api_key, safe='')}/json/{SERVICE}/{ROW_RANGE}/{quote(name, safe='')}"
     last_error = "알 수 없는 오류"
     for attempt in range(retries + 1):
         if attempt:

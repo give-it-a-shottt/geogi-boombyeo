@@ -1,4 +1,4 @@
-"""서울시 공식 파일 2개로 장소 시드(app/seed/places.json)를 만든다.
+"""서울시 공식 파일 2개로 장소 시드(app/seed_data/places.json)를 만든다.
 
 입력 (backend/data/raw, 출처: 서울 열린데이터광장 OA-21285, 공공누리 1유형)
 - seoul-121-places.xlsx : 분류, 장소 코드, 이름, 영문 이름
@@ -21,7 +21,7 @@ import shapefile
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "data" / "raw"
-OUT = ROOT / "app" / "seed" / "places.json"
+OUT = ROOT / "app" / "seed_data" / "places.json"
 # 프론트가 빌드할 때(백엔드 없이도) 121개 장소 페이지 주소와 제목을 알 수 있게 같이 만든다.
 FRONT_OUT = ROOT.parent / "frontend" / "src" / "data" / "places.json"
 
