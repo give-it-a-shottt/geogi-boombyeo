@@ -1,0 +1,183 @@
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.title {
+  flex: 1;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+/* 그래프 · 표 전환 칩: 선택은 채움으로 표시한다 (#111 테두리는 쓰지 않는다) */
+.chip {
+  height: 40px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-tag);
+  background: var(--bg-regular);
+  color: var(--text-main);
+  font-size: 14px;
+  font-weight: 500;
+  /* 누르는 영역 44 */
+  position: relative;
+}
+
+.chip::after {
+  content: "";
+  position: absolute;
+  inset: -2px 0;
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+}
+
+/* ---------- 그래프 ---------- */
+.chart {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* 왼쪽 축 글자: 색이 아니라 높이와 글자로 단계를 읽는다 */
+.axis {
+  position: relative;
+  width: 52px;
+  height: 96px;
+  margin-top: 20px;
+  flex-shrink: 0;
+  color: var(--text-sub);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.axis span {
+  position: absolute;
+  left: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
+.plot {
+  position: relative;
+  display: grid;
+  flex: 1;
+  grid-template-rows: 20px 96px auto;
+  column-gap: 2px;
+  min-width: 0;
+}
+
+.barCell {
+  grid-row: 2;
+  display: flex;
+  align-items: flex-end;
+}
+
+.bar {
+  width: 100%;
+}
+
+.bar1 {
+  height: 24px;
+  background: var(--crowd-1-fg);
+}
+
+.bar2 {
+  height: 48px;
+  background: var(--crowd-2-fg);
+}
+
+.bar3 {
+  height: 72px;
+  background: var(--crowd-3-fg);
+}
+
+.bar4 {
+  height: 96px;
+  background: var(--crowd-4-fg);
+}
+
+.tick {
+  grid-row: 3;
+  margin-top: var(--space-1);
+  overflow: visible;
+  color: var(--text-sub);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.tickNow {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+/* 추천 꼬리표 + 지시선: 꼬리표가 어느 막대를 말하는지 잇는다 */
+.recommend {
+  grid-row: 1 / 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.tag {
+  height: 17px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.stem {
+  flex: 1;
+  width: 1px;
+  margin-top: 1px;
+  background: var(--icon-sub-weak);
+}
+
+.bracket {
+  align-self: stretch;
+  height: 5px;
+  border: 1px solid var(--icon-sub-weak);
+  border-bottom: 0;
+}
+
+/* ---------- 표 ---------- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.table th,
+.table td {
+  height: 44px;
+  padding: 0 var(--space-1);
+  border-bottom: 1px solid var(--line-light);
+  text-align: left;
+  font-weight: 400;
+}
+
+.table thead th {
+  color: var(--text-sub);
+  font-size: 13px;
+}
+
+.table td:last-child,
+.table th:last-child {
+  text-align: right;
+}
+
+.tableRecommended th {
+  font-weight: 600;
+}
+
+.note {
+  color: var(--text-sub);
+  font-size: 14px;
+}

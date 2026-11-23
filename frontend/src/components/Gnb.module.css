@@ -1,0 +1,63 @@
+.gnb {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  height: var(--gnb-height);
+  padding: 0 6px;
+  background: var(--bg-default);
+  border-bottom: 1px solid var(--line-light);
+}
+
+.main {
+  padding-left: var(--space-5);
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.logoMeter {
+  display: inline-flex;
+  color: var(--icon-main);
+}
+
+.logoMeter svg + svg {
+  margin-left: -2px;
+}
+
+.logoMeterEmpty {
+  color: var(--icon-sub-weak);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: var(--radius-button);
+  background: none;
+  color: var(--icon-main);
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

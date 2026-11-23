@@ -1,0 +1,110 @@
+/* 근처 대안: 엄지 영역 바텀시트 (640 이상에서는 가운데 팝업) */
+.sheet {
+  width: 100%;
+  max-width: var(--page-width);
+  max-height: 80dvh;
+  margin: auto auto 0;
+  padding: 0 0 calc(var(--space-4) + env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  background: var(--bg-default);
+  color: var(--text-main);
+  overflow-y: auto;
+}
+
+.sheet::backdrop {
+  background: var(--bg-dim);
+}
+
+.sheet[open] {
+  animation: rise 300ms ease-out;
+}
+
+@keyframes rise {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@media (min-width: 640px) {
+  .sheet {
+    max-width: 480px;
+    margin: auto;
+    border-radius: var(--radius-sheet);
+  }
+
+  .sheet[open] {
+    animation: fade 100ms ease-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet[open] {
+    animation: fade 100ms ease-out;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) 6px var(--space-2) var(--space-5);
+  background: var(--bg-default);
+}
+
+.title {
+  flex: 1;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: var(--radius-button);
+  background: none;
+  color: var(--icon-main);
+}
+
+.caption {
+  padding: 0 var(--space-5) var(--space-2);
+  color: var(--text-sub);
+  font-size: 13px;
+}
+
+.message {
+  padding: var(--space-6) var(--space-5);
+  color: var(--text-sub);
+  font-size: 14px;
+  text-align: center;
+}
+
+.message strong {
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--text-main);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.actions {
+  padding: 0 var(--space-5);
+}
