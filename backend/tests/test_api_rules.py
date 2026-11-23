@@ -28,7 +28,7 @@ def test_top_is_capped_at_five(client, session):
 
 
 def test_ties_are_broken_by_fewer_people_not_by_name(client, session):
-    # 세 곳 모두 지금 여유이고 12시간 내내 여유 → 앞의 두 기준이 전부 같다.
+    # 네 곳 모두 지금 여유이고 12시간 내내 여유 → 앞의 두 기준이 전부 같다.
     all_calm = [1] * 11
     set_status(session, code_of(client, "경복궁"), 1, all_calm, people=9000)
     set_status(session, code_of(client, "서촌"), 1, all_calm, people=1500)
@@ -39,6 +39,22 @@ def test_ties_are_broken_by_fewer_people_not_by_name(client, session):
     # 이름순(경복궁 · 서촌 · 익선동 · 인사동)이 아니라 사람이 적은 순. 인구를 모르는 곳은 맨 뒤.
     assert [place["name"] for place in body["top"]] == ["서촌", "인사동", "경복궁", "익선동"]
     assert body["answer"]["place"]["name"] == "서촌"
+
+    # 장소 목록도 같은 순서다(같은 정렬 함수를 쓴다).
+    listed = client.get("/api/places").json()["places"]
+    assert [place["name"] for place in listed[:4]] == ["서촌", "인사동", "경복궁", "익선동"]
+
+
+def test_zero_people_is_a_real_value_and_equal_people_fall_back_to_name(client, session):
+    all_calm = [1] * 11
+    set_status(session, code_of(client, "인사동"), 1, all_calm, people=2000)
+    set_status(session, code_of(client, "서촌"), 1, all_calm, people=2000)
+    set_status(session, code_of(client, "경복궁"), 1, all_calm, people=0)
+    set_status(session, code_of(client, "익선동"), 1, all_calm)  # 추정 인구 없음
+
+    names = [place["name"] for place in client.get("/api/home").json()["top"]]
+    # 0명은 "값 없음"이 아니라 가장 적은 값이라 맨 앞. 인구가 같으면 이름순. 값이 없으면 맨 뒤.
+    assert names == ["경복궁", "서촌", "인사동", "익선동"]
 
 
 def test_people_only_matters_when_level_and_calm_hours_are_equal(client, session):
