@@ -1,5 +1,7 @@
 # 거기붐벼?
 
+**https://geogi-boombyeo.shop**
+
 서울 주요 121곳이 지금 붐비는지, **몇 시에 가면 덜 붐비는지**, 근처에 덜 붐비는 곳이 어디인지 한 문장으로 알려 주는 모바일 웹.
 
 - 데이터: [서울 실시간 도시데이터](https://data.seoul.go.kr/dataList/OA-21285/A/1/datasetView.do) (서울특별시, 공공누리 제1유형)

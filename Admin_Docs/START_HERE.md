@@ -2,16 +2,16 @@
 
 ## 내가 할 일
 - 리뷰 요약 3개의 "최종 판정" 읽고 내 생각과 다르면 고치기 → features/F-001-수집-워커/review/SUMMARY.md, F-002-조회-API/review/SUMMARY.md, F-003-웹-화면/review/SUMMARY.md
-- 휴대폰 브라우저에서 눌러 보기 2가지(위치 허용/거부, "다시 시도") → STATUS.md
+- 휴대폰으로 사이트를 열어 "지금 있는 곳, 붐비나요?" 눌러 보기(위치 허용 / 거부) → STATUS.md
 - 서비스 소개 문장이 내 말과 맞는지 확인하기 → 아래 "이 서비스는" (지금은 AI가 대신 적음)
 - 기능 3개의 설계 의도 확인하고 면접 답 적기 → features/F-00X/feature.md
 - 내가 정할 질문 5개 → OPEN_QUESTIONS.md (임시 처리대로 만들어 둠, 바꾸고 싶은 것만)
 - 화면 모양(디자인) 직접 확인하기 → `geogi-boombyeo-design.md`와 비교
-- 서버 만들고 도메인(geogi-boombyeo.shop) 연결해 배포하기 → 레포 루트의 DEPLOY.md
+- 서울 열린데이터광장 활용사례(갤러리)에 https://geogi-boombyeo.shop 등록 신청하기
 
 ## 한눈에 보기
 이 서비스는: 서울 주요 121곳이 지금 붐비는지, 몇 시에 가면 덜 붐비는지, 근처에 덜 붐비는 곳이 어디인지 한 문장으로 알려 주는 모바일 웹이다. 주말 나들이를 가는 2030과, 사람 많은 곳이 힘든 부모 · 유모차 · 휠체어 이용자를 위한 것이다. (AI 대리 작성 — 사용자 위임, 2026-11-23)
-지금 상태: 됨 2 · 일부 3 · 다음 4 · 열린 질문 5개(내가 정할 것 5개)
+지금 상태: 됨 4 · 일부 1 · 다음 5 · 열린 질문 5개(내가 정할 것 5개). 서비스 주소: https://geogi-boombyeo.shop
 
 ### 상황별 읽는 곳
 | 언제 | 여기만 읽기 | 안 읽어도 되는 것 |
@@ -59,7 +59,7 @@
 기술 스택
 - 백엔드: Python 3.13, FastAPI, SQLAlchemy 2, Alembic, httpx, Postgres(운영) / SQLite(테스트 · 로컬), uv
 - 프론트: Next.js 16.4(App Router, Cache Components), React 19, TypeScript, CSS Modules, Pretendard
-- 배포: docker-compose (db · api · worker · web · caddy), 깃허브 Actions가 이미지를 빌드해 GHCR에 올림 — 서버에서 켜는 것은 진행 중
+- 배포: 네이버 클라우드 서버 1대(메모리 1GB)에 docker-compose (db · api · worker · web · caddy). 깃허브 Actions가 이미지를 빌드해 GHCR에 올리고 서버는 내려받아 켠다
 
 실행 방법: 레포 루트의 README.md (환경변수는 이름만: SEOUL_API_KEY, DATABASE_URL, POSTGRES_PASSWORD, BACKEND_URL, SITE_URL)
 
