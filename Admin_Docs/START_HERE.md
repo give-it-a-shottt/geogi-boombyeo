@@ -59,7 +59,7 @@
 기술 스택
 - 백엔드: Python 3.13, FastAPI, SQLAlchemy 2, Alembic, httpx, Postgres(운영) / SQLite(테스트 · 로컬), uv
 - 프론트: Next.js 16.4(App Router, Cache Components), React 19, TypeScript, CSS Modules, Pretendard
-- 배포 준비: docker-compose (db · api · worker · web) — 실제 배포는 아직 안 함
+- 배포: docker-compose (db · api · worker · web · caddy), 깃허브 Actions가 이미지를 빌드해 GHCR에 올림 — 서버에서 켜는 것은 진행 중
 
 실행 방법: 레포 루트의 README.md (환경변수는 이름만: SEOUL_API_KEY, DATABASE_URL, POSTGRES_PASSWORD, BACKEND_URL, SITE_URL)
 
@@ -76,6 +76,7 @@
 | D-008 | 인증키는 환경변수로만 받고 로그에 남기지 않는다 |
 | D-009 | 응답의 장소 코드를 요청한 장소와 대조 |
 | D-010 | 공개 주소는 geogi-boombyeo.shop, HTTPS는 Caddy가 맡는다 |
+| D-011 | 이미지는 깃허브에서 빌드하고 서버는 내려받기만 한다 |
 
 디자인 기준: 레포 루트의 `geogi-boombyeo-design.md` (Admin_Docs는 디자인을 다루지 않는다)
 

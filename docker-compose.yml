@@ -1,6 +1,11 @@
 # 거기붐벼? 전체 구성: DB + 조회 API + 수집 워커 + 웹
 # 실행 전에 .env에 SEOUL_API_KEY, POSTGRES_PASSWORD, SITE_URL을 넣는다 (.env.example 참고).
-# 밖으로 여는 포트는 웹(3000)뿐이다. DB와 API는 내부 네트워크에서만 보인다.
+# 밖으로 여는 포트는 caddy의 80 · 443뿐이다. DB와 API는 내부 네트워크에서만 보인다.
+#
+# 이미지는 두 가지 방법으로 준비한다.
+# - 내 PC: docker compose up -d --build  (여기서 직접 빌드)
+# - 서버:  docker compose --profile https pull && docker compose --profile https up -d --no-build
+#          (깃허브 Actions가 빌드해 둔 이미지를 내려받기만 한다. 서버 메모리가 1GB라 빌드를 못 한다)
 
 x-database-url: &database-url postgresql://geogi:${POSTGRES_PASSWORD}@db:5432/geogi
 
@@ -8,6 +13,8 @@ services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
+    # 메모리 1GB 서버에 맞춘 작은 설정. 접속하는 프로그램이 api와 worker뿐이라 충분하다.
+    command: postgres -c shared_buffers=64MB -c max_connections=20
     environment:
       POSTGRES_DB: geogi
       POSTGRES_USER: geogi
@@ -21,6 +28,7 @@ services:
       retries: 10
 
   api:
+    image: ghcr.io/give-it-a-shottt/geogi-boombyeo-backend:latest
     build: ./backend
     restart: unless-stopped
     # 테이블을 최신으로 맞추고 121곳 시드를 넣은 뒤 서버를 띄운다.
@@ -29,7 +37,7 @@ services:
     # 위도·경도가 들어 있어서, 위치를 저장하지 않는다는 약속을 지키려고 끈다.
     command: >
       sh -c "alembic upgrade head && python -m app.seed &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --no-access-log"
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-1} --no-access-log"
     # 조회 API는 서울시 인증키가 필요 없다. 키는 worker에만 준다.
     environment:
       DATABASE_URL: *database-url
@@ -43,6 +51,7 @@ services:
       retries: 10
 
   worker:
+    image: ghcr.io/give-it-a-shottt/geogi-boombyeo-backend:latest
     build: ./backend
     restart: unless-stopped
     # 수집은 웹 서버와 따로, 반드시 한 개만 띄운다(여러 개면 같은 값을 중복 수집한다).
@@ -56,6 +65,7 @@ services:
         condition: service_healthy
 
   web:
+    image: ghcr.io/give-it-a-shottt/geogi-boombyeo-web:latest
     build:
       context: ./frontend
       # sitemap · robots · 공유 주소는 빌드할 때 만들어진다. 그래서 사이트 주소는

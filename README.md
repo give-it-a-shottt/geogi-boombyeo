@@ -51,7 +51,7 @@ docker compose up -d --build         # http://localhost:3000
 사이트 주소(`SITE_URL`)는 sitemap과 공유 주소에 들어가고 **빌드할 때** 정해진다. 주소를 바꾸면 `--build`로 다시 빌드한다.
 API 문서 화면(`/api/docs`)은 기본으로 꺼져 있다. 로컬에서 보려면 백엔드를 `ENABLE_DOCS=true`로 띄우고 `http://localhost:8000/api/docs`를 연다.
 
-실제 서버에 올리는 방법(도메인 연결, HTTPS)은 [DEPLOY.md](DEPLOY.md).
+실제 서버에 올리는 방법(도메인 연결, HTTPS)은 [DEPLOY.md](DEPLOY.md). main에 올리면 깃허브 Actions가 검사하고 도커 이미지를 만들어 둔다(`.github/workflows/build.yml`).
 
 ## 확인
 
