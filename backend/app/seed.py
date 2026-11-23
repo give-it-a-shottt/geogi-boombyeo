@@ -12,6 +12,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.db import get_session_factory
 from app.models import Place
 
 SEED_PATH = Path(__file__).resolve().parent / "seed_data" / "places.json"
@@ -36,8 +37,6 @@ def sync_places(session: Session) -> int:
 
 
 def main() -> None:
-    from app.db import get_session_factory
-
     with get_session_factory()() as session:
         print(f"장소 {sync_places(session)}곳 준비됨")
 

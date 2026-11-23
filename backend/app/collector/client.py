@@ -57,7 +57,8 @@ class Observation:
 def _to_int(value) -> int | None:
     try:
         return int(float(value))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: "1e999"처럼 너무 큰 수
         return None
 
 
@@ -80,8 +81,8 @@ def _error_code(data: dict) -> str:
 def parse_response(data: object, expected_code: str) -> Observation:
     """응답 JSON을 Observation으로. 모양이 조금이라도 다르면 SeoulApiError.
 
-    밖에서 온 값이라 모양을 믿지 않는다. 이 함수에서 SeoulApiError가 아닌 예외가
-    나가면 수집 한 바퀴 전체가 멈추므로, 예상 밖의 모양은 전부 여기서 걸러 낸다.
+    밖에서 온 값이라 모양을 믿지 않는다. 예상 밖의 모양은 여기서 SeoulApiError로 바꾼다.
+    그래도 빠져나가는 예외는 service._fetch_all이 한 번 더 받아 그 장소만의 실패로 끝낸다.
     """
     if not isinstance(data, dict):
         raise SeoulApiError("응답 형식 다름")
@@ -108,8 +109,8 @@ def parse_response(data: object, expected_code: str) -> Observation:
                         ppltn_max=_to_int(item.get("FCST_PPLTN_MAX")),
                     )
                 )
-    except (KeyError, ValueError, TypeError, AttributeError) as exc:
-        # 값이 없거나(null), 문자열이 아니거나, 목록 안이 사전이 아닌 경우
+    except (KeyError, ValueError, TypeError, AttributeError, OverflowError) as exc:
+        # 값이 없거나(null), 문자열이 아니거나, 목록 안이 사전이 아니거나, 범위를 벗어난 경우
         raise SeoulApiError("응답에 필요한 값이 없음") from exc
     forecasts.sort(key=lambda point: point.time)
     return Observation(

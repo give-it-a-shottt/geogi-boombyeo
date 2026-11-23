@@ -9,10 +9,9 @@ from datetime import datetime
 
 import httpx
 from sqlalchemy import delete, select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.collector.client import Observation, SeoulApiError, fetch_place
+from app.collector.client import BACKOFF_SECONDS, Observation, SeoulApiError, fetch_place
 from app.config import Settings
 from app.models import LAST_ERROR_MAX_LENGTH, Forecast, Place, PlaceStatus, Snapshot
 from app.timeutil import now_utc
@@ -20,6 +19,10 @@ from app.timeutil import now_utc
 logger = logging.getLogger(__name__)
 
 SAVE_FAILED = "저장 실패"
+FETCH_TIMED_OUT = "응답 시간 초과"
+# 장소 하나의 전체 한도 = 한 번의 제한 시간 × 이 값 × 시도 횟수.
+# 한 번의 요청은 연결·읽기 단계마다 제한 시간을 따로 세므로 여유를 둔다.
+DEADLINE_FACTOR = 3
 
 
 @dataclass(frozen=True)
@@ -96,29 +99,47 @@ def record_failure(session: Session, code: str, message: str, now: datetime) -> 
 async def _fetch_all(
     http: httpx.AsyncClient, settings: Settings, places: list[tuple[str, str]]
 ) -> list[Observation | SeoulApiError]:
-    """모든 장소를 동시에(한 번에 collect_concurrency개씩) 가져온다. 예외를 던지지 않는다."""
+    """모든 장소를 동시에(한 번에 collect_concurrency개씩) 가져온다.
+
+    예외를 던지지 않고, 정해진 시간 안에 반드시 끝난다. 저장은 전부 가져온 뒤에
+    시작하므로, 한 곳이라도 끝나지 않으면 121곳 전부가 저장되지 않기 때문이다.
+    """
     semaphore = asyncio.Semaphore(settings.collect_concurrency)
+    deadline = place_deadline_seconds(settings)
 
     async def fetch(code: str, name: str) -> Observation | SeoulApiError:
         async with semaphore:
             try:
-                return await fetch_place(
-                    http,
-                    base_url=settings.seoul_api_base_url,
-                    api_key=settings.seoul_api_key.get_secret_value(),
-                    code=code,
-                    name=name,
-                    retries=settings.collect_retries,
-                )
+                # httpx의 제한 시간은 "조각 하나를 받는 시간"이라, 조금씩 끝없이 보내는
+                # 응답은 막지 못한다. 그래서 장소 하나에 쓰는 전체 시간에도 한도를 둔다.
+                async with asyncio.timeout(deadline):
+                    return await fetch_place(
+                        http,
+                        base_url=settings.seoul_api_base_url,
+                        api_key=settings.seoul_api_key.get_secret_value(),
+                        code=code,
+                        name=name,
+                        retries=settings.collect_retries,
+                    )
             except SeoulApiError as exc:
                 return exc
+            except TimeoutError:
+                return SeoulApiError(FETCH_TIMED_OUT)
             except Exception as exc:
                 # 예상하지 못한 오류도 이 장소만의 실패로 끝낸다. 여기서 예외가 새면
                 # gather가 깨져 121곳 전부가 저장되지 않는다.
                 # 예외 원문에는 주소(인증키)가 들어 있을 수 있어 종류 이름만 남긴다.
+                logger.warning("처리 실패 %s %s", code, type(exc).__name__)
                 return SeoulApiError(f"처리 실패 {type(exc).__name__}")
 
     return await asyncio.gather(*(fetch(code, name) for code, name in places))
+
+
+def place_deadline_seconds(settings: Settings) -> float:
+    """장소 하나에 쓸 수 있는 전체 시간: (시도 횟수 × 넉넉한 한 번의 시간) + 재시도 사이 대기."""
+    attempts = settings.collect_retries + 1
+    waits = sum(BACKOFF_SECONDS * attempt for attempt in range(1, attempts))
+    return settings.collect_timeout_seconds * DEADLINE_FACTOR * attempts + waits
 
 
 def _save(session: Session, code: str, result: Observation | SeoulApiError, now: datetime) -> bool:
@@ -129,13 +150,15 @@ def _save(session: Session, code: str, result: Observation | SeoulApiError, now:
             return False
         store_observation(session, result, now)
         return True
-    except SQLAlchemyError:
+    except Exception:
+        # DB 오류든 그 밖의 오류든, 반쯤 쓴 것을 되돌리고 다음 장소로 넘어간다.
+        # (여기서 예외가 새면 뒤쪽 장소는 가져온 값도 저장하지 못한다.)
         session.rollback()
         logger.exception("저장 실패 %s", code)
     try:
         # 저장하지 못했다는 사실도 장소별 기록에 남긴다. 이것마저 안 되면 로그만 남는다.
         record_failure(session, code, SAVE_FAILED, now)
-    except SQLAlchemyError:
+    except Exception:
         session.rollback()
         logger.exception("실패 기록도 저장하지 못함 %s", code)
     return False

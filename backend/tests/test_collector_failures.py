@@ -12,9 +12,9 @@ from sqlalchemy.exc import OperationalError
 
 from app import worker
 from app.collector import service
-from app.collector.client import SeoulApiError, fetch_place, parse_response
-from app.collector.service import SAVE_FAILED, collect_once
-from app.models import Place, PlaceStatus, Snapshot
+from app.collector.client import SeoulApiError, _to_int, fetch_place, parse_response
+from app.collector.service import FETCH_TIMED_OUT, SAVE_FAILED, collect_once
+from app.models import Forecast, Place, PlaceStatus, Snapshot
 from tests.test_collector import CODE, NAME, payload
 
 KEY = "test-key-123"  # conftest의 settings 값과 같다
@@ -40,6 +40,7 @@ def with_row(**changes) -> dict:
         with_row(PPLTN_TIME=20261123),  # 시각이 숫자
         with_row(FCST_PPLTN="문자열"),  # 예측이 목록이 아님
         with_row(FCST_PPLTN=[None]),  # 예측 칸이 null
+        with_row(PPLTN_TIME="99999-01-01 00:00"),  # 범위를 벗어난 연도
     ],
 )
 def test_parse_turns_any_odd_shape_into_seoul_api_error(data):
@@ -137,28 +138,109 @@ def test_odd_response_and_unexpected_error_fail_only_that_place(session_factory,
         assert session.get(PlaceStatus, "POI005").level == 3
 
 
-def test_save_failure_is_recorded_for_that_place_only(session_factory, settings, monkeypatch):
+def test_too_large_number_becomes_none_not_an_exception():
+    assert _to_int("1e999") is None
+    assert parse_response(with_row(AREA_PPLTN_MIN="1e999"), CODE).ppltn_min is None
+
+
+def ok_handler(names):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload(code=names[request.url.path.rsplit("/", 1)[-1]]))
+
+    return handler
+
+
+def rows_for(session, model, code: str) -> int:
+    return session.scalar(select(func.count()).select_from(model).where(model.place_code == code))
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OperationalError("insert", {}, Exception("db down")),  # DB 오류
+        RuntimeError("DB 오류가 아닌 예외"),  # 그 밖의 예외도 같은 길로 처리한다
+    ],
+)
+def test_save_failure_rolls_back_and_is_recorded(session_factory, settings, monkeypatch, error):
     names = place_names(session_factory)
     real_store = service.store_observation
 
-    def flaky_store(session, obs, now):
+    def half_written_store(session, obs, now):
+        if obs.code != "POI001":
+            return real_store(session, obs, now)
+        # 스냅샷과 예측을 DB로 내보낸 뒤(commit 전) 실패한다 = 반쯤 쓴 상태.
+        session.add(
+            Snapshot(place_code=obs.code, observed_at=obs.observed_at, collected_at=now, level=1)
+        )
+        session.add(Forecast(place_code=obs.code, forecast_time=now, level=1))
+        session.flush()
+        raise error
+
+    monkeypatch.setattr(service, "store_observation", half_written_store)
+
+    result = collect(session_factory, settings, ok_handler(names))
+
+    assert (result.succeeded, result.failed) == (120, 1)
+    with session_factory() as session:
+        # 반쯤 쓴 것이 남지 않는다(롤백).
+        assert rows_for(session, Snapshot, "POI001") == 0
+        assert rows_for(session, Forecast, "POI001") == 0
+        failed = session.get(PlaceStatus, "POI001")
+        assert failed.level is None and failed.observed_at is None
+        assert failed.last_error == SAVE_FAILED and failed.fail_count == 1
+        # 다른 장소는 정상 저장된다.
+        assert session.scalar(select(func.count()).select_from(Snapshot)) == 120
+        assert session.get(PlaceStatus, "POI002").level == 3
+
+
+def test_round_finishes_even_when_failure_cannot_be_recorded(
+    session_factory, settings, monkeypatch
+):
+    names = place_names(session_factory)
+    real_store, real_record = service.store_observation, service.record_failure
+
+    def broken_store(session, obs, now):
         if obs.code == "POI001":
             raise OperationalError("insert", {}, Exception("db down"))
         real_store(session, obs, now)
 
-    monkeypatch.setattr(service, "store_observation", flaky_store)
+    def broken_record(session, code, message, now):
+        if code == "POI001":
+            raise OperationalError("update", {}, Exception("db down"))
+        real_record(session, code, message, now)
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=payload(code=names[request.url.path.rsplit("/", 1)[-1]]))
+    monkeypatch.setattr(service, "store_observation", broken_store)
+    monkeypatch.setattr(service, "record_failure", broken_record)
 
-    result = collect(session_factory, settings, handler)
+    result = collect(session_factory, settings, ok_handler(names))
 
+    # 실패 기록조차 못 남겨도(로그만 남음) 나머지 120곳은 저장된다.
     assert (result.succeeded, result.failed) == (120, 1)
     with session_factory() as session:
-        failed = session.get(PlaceStatus, "POI001")
-        assert failed.last_error == SAVE_FAILED and failed.fail_count == 1
-        assert failed.level is None
+        assert session.get(PlaceStatus, "POI001") is None
         assert session.scalar(select(func.count()).select_from(Snapshot)) == 120
+
+
+def test_place_that_never_finishes_does_not_hold_the_round(session_factory, settings):
+    names = place_names(session_factory)
+    # 한도를 아주 짧게: 0.02초 × 3 × (재시도 0 + 1) = 0.06초
+    settings.collect_timeout_seconds = 0.02
+    settings.collect_retries = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        code = names[request.url.path.rsplit("/", 1)[-1]]
+        if code == "POI001":
+            await asyncio.sleep(30)  # 끝나지 않는 응답
+        return httpx.Response(200, json=payload(code=code))
+
+    started = datetime.now(UTC)
+    result = collect(session_factory, settings, handler)
+    elapsed = (datetime.now(UTC) - started).total_seconds()
+
+    assert elapsed < 10
+    assert (result.succeeded, result.failed) == (120, 1)
+    with session_factory() as session:
+        assert session.get(PlaceStatus, "POI001").last_error == FETCH_TIMED_OUT
 
 
 class FakeSettings:
