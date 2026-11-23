@@ -5,7 +5,7 @@
 
 - 디자인 기준 문서는 `geogi-boombyeo-design.md`다. 피그마보다 이 문서가 우선이다.
 - 프론트는 Next 16 Cache Components를 쓴다. 코드를 쓰기 전에 `frontend/AGENTS.md`의 안내대로 `node_modules/next/dist/docs/`를 확인한다.
-- 장소 목록은 `backend/scripts/build_seed.py`가 만든다. `backend/app/seed/places.json`과 `frontend/src/data/places.json`을 손으로 고치지 않는다.
+- 장소 목록은 `backend/scripts/build_seed.py`가 만든다. `backend/app/seed_data/places.json`과 `frontend/src/data/places.json`을 손으로 고치지 않는다.
 
 ## Admin_Docs 규칙 (admin-docs-review)
 

@@ -30,6 +30,7 @@
 cd backend
 uv sync
 uv run alembic upgrade head          # 테이블 만들기
+uv run python -m app.seed            # 121곳 넣기
 uv run python -m app.worker --once   # 한 번 수집 (계속 수집하려면 --once를 뺀다)
 uv run uvicorn app.main:app --port 8000
 
@@ -47,6 +48,9 @@ npm run dev                          # http://localhost:3000
 docker compose up -d --build         # http://localhost:3000
 ```
 
+사이트 주소(`SITE_URL`)는 sitemap과 공유 주소에 들어가고 **빌드할 때** 정해진다. 주소를 바꾸면 `--build`로 다시 빌드한다.
+API 문서 화면(`/api/docs`)은 기본으로 꺼져 있다. 로컬에서 보려면 백엔드를 `ENABLE_DOCS=true`로 띄우고 `http://localhost:8000/api/docs`를 연다.
+
 ## 확인
 
 ```bash
@@ -62,4 +66,4 @@ cd frontend && npm test && npm run typecheck && npm run lint && npm run build
 cd backend && uv run --with openpyxl --with pyshp python scripts/build_seed.py
 ```
 
-백엔드 시드(`backend/app/seed/places.json`)와 프론트 장소 목록(`frontend/src/data/places.json`)이 함께 만들어진다.
+백엔드 시드(`backend/app/seed_data/places.json`)와 프론트 장소 목록(`frontend/src/data/places.json`)이 함께 만들어진다.
