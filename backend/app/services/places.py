@@ -58,6 +58,8 @@ TIMELINE_FUTURE = 11
 AXIS_LABEL_EVERY_HOURS = 3
 # 거리는 소수 첫째 자리(100m 단위)까지 보여 준다. 근처 대안의 "거리가 같다"도 이 단위로 본다.
 DISTANCE_DIGITS = 1
+# 추정 인구가 없는 장소는 같은 조건의 장소들 중 맨 뒤에 둔다.
+UNKNOWN_PEOPLE = float("inf")
 
 
 @dataclass
@@ -119,8 +121,18 @@ def health(session: Session, views: list[PlaceView]) -> HealthResponse:
 
 
 def rank_key(view: PlaceView) -> tuple:
-    """여유 순: 지금 단계가 낮을수록, 여유가 오래 이어질수록 앞."""
-    return (view.level, -relaxed_hours(view.level, view.future), view.place.name)
+    """여유 순: 지금 단계가 낮을수록, 여유가 오래 이어질수록, 그래도 같으면 사람이 적을수록 앞.
+
+    저녁에는 12시간 내내 여유인 곳이 많아 앞의 두 기준이 전부 같아진다. 그때 이름순으로
+    줄을 세우면 순위에 뜻이 없어서, 지금 있는 사람 수(추정 인구의 큰 쪽)로 가른다.
+    """
+    people = view.status.ppltn_max if view.status else None
+    return (
+        view.level,
+        -relaxed_hours(view.level, view.future),
+        UNKNOWN_PEOPLE if people is None else people,
+        view.place.name,
+    )
 
 
 def to_card(view: PlaceView, now: datetime, distance: float | None = None) -> PlaceCard:

@@ -27,6 +27,30 @@ def test_top_is_capped_at_five(client, session):
     assert len(client.get("/api/home").json()["top"]) == 5
 
 
+def test_ties_are_broken_by_fewer_people_not_by_name(client, session):
+    # 세 곳 모두 지금 여유이고 12시간 내내 여유 → 앞의 두 기준이 전부 같다.
+    all_calm = [1] * 11
+    set_status(session, code_of(client, "경복궁"), 1, all_calm, people=9000)
+    set_status(session, code_of(client, "서촌"), 1, all_calm, people=1500)
+    set_status(session, code_of(client, "인사동"), 1, all_calm, people=4000)
+    set_status(session, code_of(client, "익선동"), 1, all_calm)  # 추정 인구 없음
+
+    body = client.get("/api/home").json()
+    # 이름순(경복궁 · 서촌 · 익선동 · 인사동)이 아니라 사람이 적은 순. 인구를 모르는 곳은 맨 뒤.
+    assert [place["name"] for place in body["top"]] == ["서촌", "인사동", "경복궁", "익선동"]
+    assert body["answer"]["place"]["name"] == "서촌"
+
+
+def test_people_only_matters_when_level_and_calm_hours_are_equal(client, session):
+    # 사람이 훨씬 적어도 단계가 높으면 뒤, 여유가 짧으면 뒤.
+    set_status(session, code_of(client, "경복궁"), 1, [1] * 11, people=9000)
+    set_status(session, code_of(client, "서촌"), 1, [1, 2, 2], people=100)
+    set_status(session, code_of(client, "인사동"), 2, [2] * 11, people=50)
+
+    names = [place["name"] for place in client.get("/api/home").json()["top"]]
+    assert names == ["경복궁", "서촌", "인사동"]
+
+
 def test_nearby_is_capped_at_three_and_sorted_by_distance(client, session):
     base = code_of(client, "경복궁")
     set_status(session, base, 4, [4])

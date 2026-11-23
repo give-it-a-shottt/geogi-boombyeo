@@ -76,6 +76,7 @@ def set_status(
     *,
     minutes_ago: int = 25,
     now: datetime | None = None,
+    people: int | None = None,
 ) -> None:
     """장소 하나에 최신 상태와 앞으로의 예측을 넣는다."""
     now = now or FIXED_NOW
@@ -84,6 +85,8 @@ def set_status(
         PlaceStatus(
             place_code=code,
             level=level,
+            ppltn_min=None if people is None else max(0, people - 500),
+            ppltn_max=people,
             observed_at=observed,
             last_success_at=observed,
             last_attempt_at=observed,
