@@ -1,0 +1,62 @@
+# 거기붐벼? 전체 구성: DB + 조회 API + 수집 워커 + 웹
+# 실행 전에 .env에 SEOUL_API_KEY와 POSTGRES_PASSWORD를 넣는다 (.env.example 참고).
+# 밖으로 여는 포트는 웹(3000)뿐이다. DB와 API는 내부 네트워크에서만 보인다.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: geogi
+      POSTGRES_USER: geogi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD를 .env에 넣어 주세요}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geogi -d geogi"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    # 테이블을 최신으로 맞춘 뒤 서버를 띄운다. 마이그레이션은 여기 한 곳에서만 돌린다.
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+    environment: &backend-env
+      DATABASE_URL: postgresql://geogi:${POSTGRES_PASSWORD}@db:5432/geogi
+      SEOUL_API_KEY: ${SEOUL_API_KEY:?SEOUL_API_KEY를 .env에 넣어 주세요}
+      COLLECT_INTERVAL_SECONDS: ${COLLECT_INTERVAL_SECONDS:-300}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    # 수집은 웹 서버와 따로, 반드시 한 개만 띄운다(여러 개면 같은 값을 중복 수집한다).
+    command: python -m app.worker
+    environment: *backend-env
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://api:8000
+      SITE_URL: ${SITE_URL:-http://localhost:3000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  db-data:
